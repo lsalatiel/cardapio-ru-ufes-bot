@@ -147,7 +147,11 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 def main():
-    BOT_TOKEN = "7420733797:AAFXivNHGI7IegCE_bbMwHmEqTXNJQaIzDM"
+    BOT_TOKEN = os.getenv('BOT_TOKEN')
+    
+    if not BOT_TOKEN:
+        print("Error: BOT_TOKEN environment variable not set!")
+        return
     
     application = Application.builder().token(BOT_TOKEN).build()
     
