@@ -53,9 +53,9 @@ def get_menu():
 
     content = content_soup.get_text()
 
-    if content.startswith('['):
-        return "Menu still not available for today..."
-
     menu = process_menu_string(content)
+
+    if menu.startswith('['):
+       return "Menu still not available for today..."
 
     return menu
