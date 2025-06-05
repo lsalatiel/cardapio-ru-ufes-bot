@@ -120,9 +120,9 @@ async def send_morning_daily_menu(context: ContextTypes.DEFAULT_TYPE):
 
 async def send_evening_daily_menu(context: ContextTypes.DEFAULT_TYPE):
     users = load_users()
-    lunch_menu = __get_lunch()
+    dinner_menu = __get_dinner()
     
-    message = f"Bom tarde estudante! Da uma olhada na sua jantinha:\n\n{lunch_menu}"
+    message = f"Bom tarde estudante! Da uma olhada na sua jantinha:\n\n{dinner_menu}"
     
     for chat_id in users:
         try:
