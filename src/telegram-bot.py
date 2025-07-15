@@ -4,9 +4,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, filters, C
 from scraper import get_menu as scrape_menu
 import json
 import os
-from datetime import time
+from datetime import time, datetime
 
 USERS_FILE = "users.json"
+SENT_MENUS_FILE = "sent_menus.json"
 
 def load_users():
     if os.path.exists(USERS_FILE):
@@ -20,6 +21,26 @@ def save_user(chat_id):
         users.append(chat_id)
         with open(USERS_FILE, 'w') as f:
             json.dump(users, f)
+
+def load_sent_menus():
+    if os.path.exists(SENT_MENUS_FILE):
+        with open(SENT_MENUS_FILE, 'r') as f:
+            return json.load(f)
+    return {"date": "", "lunch_sent": False, "dinner_sent": False}
+
+def save_sent_menus(data):
+    with open(SENT_MENUS_FILE, 'w') as f:
+        json.dump(data, f)
+
+def reset_daily_status():
+    today = datetime.now().strftime("%Y-%m-%d")
+    sent_data = load_sent_menus()
+    
+    if sent_data["date"] != today:
+        sent_data = {"date": today, "lunch_sent": False, "dinner_sent": False}
+        save_sent_menus(sent_data)
+    
+    return sent_data
 
 async def toggle_notifications(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
@@ -74,7 +95,7 @@ def __get_lunch():
     menu = scrape_menu()
 
     if 'Almoço' not in menu:
-        return "Lunch menu not available for today yet."
+        return None
     
     lunch_menu = menu.split('Jantar')[0].strip()
     return lunch_menu
@@ -86,13 +107,16 @@ async def get_lunch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     lunch_menu = __get_lunch()
     
-    await update.message.reply_text(lunch_menu)
+    if lunch_menu is None:
+        await update.message.reply_text("Lunch menu not available for today yet.")
+    else:
+        await update.message.reply_text(lunch_menu)
 
 def __get_dinner():
     menu = scrape_menu()
 
     if 'Jantar' not in menu:
-        return "Dinner menu not available for today yet."
+        return None
     
     dinner_menu = menu.split('Jantar')[1].strip()
     return dinner_menu
@@ -104,31 +128,88 @@ async def get_dinner(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     dinner_menu = __get_dinner()
     
-    await update.message.reply_text(dinner_menu)
+    if dinner_menu is None:
+        await update.message.reply_text("Dinner menu not available for today yet.")
+    else:
+        await update.message.reply_text(dinner_menu)
 
-async def send_morning_daily_menu(context: ContextTypes.DEFAULT_TYPE):
-    users = load_users()
+async def check_and_send_lunch(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now()
+    current_hour = now.hour
+    
+    # only check between 8 AM and 1 PM (13:00)
+    if current_hour < 8 or current_hour >= 13:
+        return
+    
+    if now.weekday() >= 5:
+        return
+    
+    sent_data = reset_daily_status()
+    
+    if sent_data["lunch_sent"]:
+        return
+    
     lunch_menu = __get_lunch()
+    if lunch_menu is None:
+        print(f"[{now.strftime('%H:%M')}] Lunch menu not available yet")
+        return
     
-    message = f"Bom dia estudante! Olha aqui o seu delicioso almosso:\n\n{lunch_menu}"
-    
-    for chat_id in users:
-        try:
-            await context.bot.send_message(chat_id=chat_id, text=message)
-        except Exception as e:
-            print(f"Failed to send to {chat_id}: {e}")
-
-async def send_evening_daily_menu(context: ContextTypes.DEFAULT_TYPE):
     users = load_users()
-    dinner_menu = __get_dinner()
+    message = f"🍽️ Bom dia estudante! Olha aqui o seu delicioso almoço:\n\n{lunch_menu}"
     
-    message = f"Bom tarde estudante! Da uma olhada na sua jantinha:\n\n{dinner_menu}"
-    
+    sent_count = 0
     for chat_id in users:
         try:
             await context.bot.send_message(chat_id=chat_id, text=message)
+            sent_count += 1
         except Exception as e:
-            print(f"Failed to send to {chat_id}: {e}")
+            print(f"Failed to send lunch to {chat_id}: {e}")
+    
+    sent_data["lunch_sent"] = True
+    save_sent_menus(sent_data)
+    
+    print(f"[{now.strftime('%H:%M')}] Lunch menu sent to {sent_count} users")
+
+async def check_and_send_dinner(context: ContextTypes.DEFAULT_TYPE):
+    now = datetime.now()
+    current_hour = now.hour
+    
+    # only check between 2 PM (14:00) and 7 PM (19:00)
+    if current_hour < 14 or current_hour >= 19:
+        return
+    
+    if now.weekday() >= 5:
+        return
+    
+    sent_data = reset_daily_status()
+    
+    if sent_data["dinner_sent"]:
+        return
+    
+    dinner_menu = __get_dinner()
+    if dinner_menu is None:
+        print(f"[{now.strftime('%H:%M')}] Dinner menu not available yet")
+        return
+    
+    users = load_users()
+    message = f"Boa tarde estudante! Da uma olhada na sua jantinha:\n\n{dinner_menu}"
+    
+    sent_count = 0
+    for chat_id in users:
+        try:
+            await context.bot.send_message(chat_id=chat_id, text=message)
+            sent_count += 1
+        except Exception as e:
+            print(f"Failed to send dinner to {chat_id}: {e}")
+    
+    sent_data["dinner_sent"] = True
+    save_sent_menus(sent_data)
+    
+    print(f"[{now.strftime('%H:%M')}] Dinner menu sent to {sent_count} users")
+
+async def periodic_menu_check(context: ContextTypes.DEFAULT_TYPE):
+    await check_and_send_lunch(context)
+    await check_and_send_dinner(context)
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_user(update.effective_chat.id)
@@ -137,9 +218,9 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if any(word in text for word in ['menu', 'cardapio', 'cardápio']):
         await get_menu(update, context)
-    if any(word in text for word in ['almoco', 'almosso', 'almoço']):
+    elif any(word in text for word in ['almoco', 'almosso', 'almoço']):
         await get_lunch(update, context)
-    if any(word in text for word in ['janta', 'jantar', 'jantinha']):
+    elif any(word in text for word in ['janta', 'jantar', 'jantinha']):
         await get_dinner(update, context)
     else:
         await update.message.reply_text(
@@ -164,21 +245,17 @@ def main():
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     job_queue = application.job_queue
-    job_queue.run_daily(
-        send_morning_daily_menu, 
-        time=time(13, 30),
-        days=(1, 2, 3, 4, 5),
-        name="daily_menu"
-    )
-    job_queue.run_daily(
-        send_evening_daily_menu, 
-        time=time(19, 0),
-        days=(1, 2, 3, 4, 5),
-        name="daily_menu"
+    job_queue.run_repeating(
+        periodic_menu_check,
+        interval=600,  # 600 seconds = 10 minutes
+        first=10,  # start checking 10 seconds after bot starts
+        name="menu_checker"
     )
     
     print("Bot is starting...")
-    print("Daily menu will be sent at 10:30 AM and at 16:00 to all users")
+    print("Will check for lunch menu every 10 minutes from 8 AM to 2 PM")
+    print("Will check for dinner menu every 10 minutes from 2 PM to 8 PM")
+    print("Only on weekdays (Monday to Friday)")
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == '__main__':
